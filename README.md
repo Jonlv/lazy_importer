@@ -1,97 +1,100 @@
-# lazy importer
+# lazy importer [![](https://img.shields.io/badge/version-2.0.1-green.svg)]()
+
 A simple and easy to use header only library to make the life of a reverse engineer much harder.
 
-## Small example
+## small example
+
 ```cpp
-LI_FIND(MessageBoxA)(nullptr, "hello world", nullptr, 0);
+LI_FN(OutputDebugStringA)("hello world");
+LI_FN(VirtualProtect).in(LI_MODULE("kernel32.dll").cached());
 ```
 
-## Features
-* Does not leave any strings in memory.
-* Does not allocate any memory.
-* Can be easily inlined.
-* Does not import any functions.
-* Produces extremely small assembly.
-* Non caching functions do not leave anything in data sections.
+[IDA output when compiling first line](#example-output)
 
-## A thing to take consideration of
-You must be sure that the function you are trying to find is exported and the shared library is loaded.
-If that is not the case your program _will_ crash.
+## features
 
-## Example output
-Example from above decompiled with ida when forcefully not inlined
+- Does not leave any strings in memory.
+- Does not allocate any memory.
+- Can be easily inlined.
+- Does not leave any imports in the executable.
+- Produces extremely small assembly.
+- Non caching functions do not leave anything in data sections.
+
+## documentation
+
+- `LI_FN(function_pointer) -> lazy_function`
+- `LI_FN_DEF(function_type) -> lazy_function`
+- `LI_MODULE(module_name) -> lazy_module`
+
+#### **`lazy_module`**
+
+| function                 | explanation                                                                  |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| `get<T = void*>`         | returns address of module. If module does not exist behavior is not defined. |
+| `safe<T = void*>`        | returns address of module. If module does not exist returns 0.               |
+| `cached<T = void*>`      | same as `get` except the result is cached.                                   |
+| `safe_cached<T = void*>` | same as `safe` except the result is cached.                                  |
+
+#### **`lazy_function`**
+
+Shares API with lazy_module except it returns the address of function with these additions:
+
+- has overloaded `operator()` which acquires function using `get` and calls it
+  with provided arguments.
+- `forwarded`, `forwarded_safe`, `forwarded_cached`, `forwarded_safe_cached` same as `get` with the addition of ability to resolve forwarded exports.
+- `in`, `in_safe`, `in_cached`, `in_safe_cached` same functionality as `get`, but the search is done in a single module whose base address is the first parameter.
+- `nt`, `nt_safe`, `nt_cached`, `nt_safe_cached` same as `in(LI_MODULE("ntdll.dll).get())`.
+
+#### extra configuration
+
+| `#define`                                 | description                                                                             |
+| ----------------------------------------- | --------------------------------------------------------------------------------------- |
+| `LAZY_IMPORTER_NO_FORCEINLINE`            | disables force inlining                                                                 |
+| `LAZY_IMPORTER_CASE_INSENSITIVE`          | enables case insensitive comparison. Might be required for forwarded export resolution. |
+| `LAZY_IMPORTER_CACHE_OPERATOR_PARENS`     | uses `cached()` instead of `get()` in `operator()` of lazy_function                     |
+| `LAZY_IMPORTER_RESOLVE_FORWARDED_EXPORTS` | uses `forwarded()` in `get()`. NOTE does not apply to `nt()` and `in()`.                |
+
+## example output
+
 ```c
-char *sub_1400010D0()
-{
-  // variable declarations
-
-  for ( i = *(_QWORD **)(*(_QWORD *)(*(_QWORD *)(__readgsqword(0x30u) + 96) + 24i64) + 16i64); ; i = (_QWORD *)*i )
+for ( i = *(_QWORD **)(*(_QWORD *)(__readgsqword(0x60u) + 24) + 16i64); ; i = (_QWORD *)*i )
   {
-    v1 = (_DWORD *)i[6];
-    v2 = (_DWORD *)((char *)v1 + *(unsigned int *)((char *)v1 + v1[15] + 136));
-    if ( v2 != v1 )
+    v1 = i[6];
+    v2 = *(unsigned int *)(*(signed int *)(v1 + 60) + v1 + 136);
+    v3 = (_DWORD *)(v2 + v1);
+    if ( v2 + v1 != v1 )
     {
-      v3 = 0i64;
-      if ( v2[6] )
+      LODWORD(v4) = v3[6];
+      if ( (_DWORD)v4 )
         break;
     }
-LABEL_9:
+LABEL_8:
     ;
   }
-  v4 = (_DWORD *)((char *)v1 + (unsigned int)v2[8]);
   while ( 1 )
   {
+    v4 = (unsigned int)(v4 - 1);
     v5 = -2128831035;
-    v6 = (char *)v1 + *v4;
+    v6 = (char *)(v1 + *(unsigned int *)((unsigned int)v3[8] + 4 * v4 + v1));
     v7 = *v6;
-    if ( *v6 )
+    v8 = (signed __int64)(v6 + 1);
+    if ( v7 )
     {
       do
       {
-        ++v6;
+        ++v8;
         v5 = 16777619 * (v5 ^ v7);
-        v7 = *v6;
+        v7 = *(_BYTE *)(v8 - 1);
       }
-      while ( *v6 );
-      if ( v5 == 598309348 )
-        return (char *)v1
-             + *(unsigned int *)((char *)&v1[*(unsigned __int16 *)((char *)v1 + 2 * v3 + (unsigned int)v2[9])]
-                               + (unsigned int)v2[7]);
+      while ( v7 );
+      if ( v5 == -973690651 )
+        break;
     }
-    v3 = (unsigned int)(v3 + 1);
-    ++v4;
-    if ( (unsigned int)v3 >= v2[6] )
-      goto LABEL_9;
+    if ( !(_DWORD)v4 )
+      goto LABEL_8;
   }
-}
+  ((void (__fastcall *)(const char *))(v1
+                                     + *(unsigned int *)(v1
+                                                       + (unsigned int)v3[7]
+                                                       + 4i64 * *(unsigned __int16 *)(v1 + (unsigned int)v3[9] + 2 * v4))))("hello world");
 ```
-
-## Documentation
-lazy importer exposes 4 rather self explanatory macros with multiple "overloads".
-
-`LI_FIND[_DEF][_CACHED](function)`
-Iterates trough all modules and their exports.
-
-`LI_NT[_DEF][_CACHED](function)`
-Iterates trough `ntdll.dll` exports.
-
-`LI_GET[_DEF](module_base_address, function)`
-Iterates trough exports of given module.
-
-`LI_MODULE(module_name_string)`
-Finds module base address, behaviour is undefined if module is not found.
-
-`LI_MODULE_SAFE(module_name_string)`
-Finds module base address, returns null if module is not found.
-
-* If macro name contains "_DEF" the expected parameter "function" is a typedef/alias, otherwise a function pointer.
-* If macro name contains "_CACHED" a static variable will be used to store the function pointer for fast access in subsequent calls. Note that for each hash there is a separate static variable.
-
-None of these functions throw exceptions and are linear in complexity.
-
-## Extra configuration
-define LAZY_IMPORTER_NO_FORCEINLINE to disable force inlining.
-
-define LAZY_IMPORTER_CASE_INSENSITIVE to enable case insensitive comparisons.
-
-define LAZY_IMPORTER_RESOLVE_FORWARDED_EXPORTS to enable resolution of forwarded exports. IMPORTANT: LAZY_IMPORTER_CASE_INSENSITIVE might be necessary for this option to function properly.

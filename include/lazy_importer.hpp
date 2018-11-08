@@ -14,76 +14,21 @@
  * limitations under the License.
  */
 
+// documentation is available at https://github.com/JustasMasiulis/lazy_importer
+
 #ifndef LAZY_IMPORTER_HPP
 #define LAZY_IMPORTER_HPP
 
-// define LAZY_IMPORTER_NO_FORCEINLINE to disable force inlining
+#define LI_FN(name) \
+    ::li::detail::lazy_function<::li::detail::khash(#name), decltype(&name)>()
 
-// define LAZY_IMPORTER_RESOLVE_FORWARDED_EXPORTS to enable resolution of forwarded
-// exports. IMPORTANT: LAZY_IMPORTER_CASE_INSENSITIVE might be necessary for this option
-// to function properly.
+#define LI_FN_DEF(name) ::li::detail::lazy_function<::li::detail::khash(#name), name>()
 
-// define LAZY_IMPORTER_CASE_INSENSITIVE to enable case insensitive comparisons
+#define LI_MODULE(name) ::li::detail::lazy_module<::li::detail::khash(name)>()
 
-
-// DEF functions are for use with typedefs
-// non DEF functions are for use with function pointers
-
-
-// usage examples:
-
-// using a function pointer:
-// HMODULE __stdcall LoadLibraryA(const char*);
-// LI_FIND(LoadLibraryA)("user32.dll");
-
-// using a typedef:
-// using LoadLibraryA = HMODULE (__stdcall*)(const char*);
-// LI_FIND_DEF(LoadLibraryA)("user32.dll");
-
-// can be used for any function. Prefer for functions that you call rarely.
-#define LI_FIND(name)                  \
-    reinterpret_cast<decltype(&name)>( \
-        ::li::detail::find_nocache<::li::detail::khash(#name)>())
-#define LI_FIND_DEF(name) \
-    reinterpret_cast<name>(::li::detail::find_nocache<::li::detail::khash(#name)>())
-
-// can be used for any function. Prefer for functions that you call often.
-#define LI_FIND_CACHED(name)           \
-    reinterpret_cast<decltype(&name)>( \
-        ::li::detail::find_cached<::li::detail::khash(#name)>())
-#define LI_FIND_DEF_CACHED(name) \
-    reinterpret_cast<name>(::li::detail::find_cached<::li::detail::khash(#name)>())
-
-// can be used for any function in provided module.
-// There is no cached version because there might be functions with the same
-// name in separate modules. If that is not a concern for you feel free to add
-// it yourself
-#define LI_GET(module_base, name)      \
-    reinterpret_cast<decltype(&name)>( \
-        ::li::detail::find_in_module<::li::detail::khash(#name)>(module_base))
-#define LI_GET_DEF(module_base, name) \
-    reinterpret_cast<name>(           \
-        ::li::detail::find_in_module<::li::detail::khash(#name)>(module_base))
-
-// can be used for ntdll exports. Prefer for functions that you call rarely.
-#define LI_NT(name) \
-    reinterpret_cast<decltype(&name)>(::li::detail::find_nt<::li::detail::khash(#name)>())
-#define LI_NT_DEF(name) \
-    reinterpret_cast<name>(::li::detail::find_nt<::li::detail::khash(#name)>())
-
-// can be used for ntdll exports. Prefer for functions that you call often.
-#define LI_NT_CACHED(name)             \
-    reinterpret_cast<decltype(&name)>( \
-        ::li::detail::find_nt_cached<::li::detail::khash(#name)>())
-#define LI_NT_DEF_CACHED(name) \
-    reinterpret_cast<name>(::li::detail::find_nt_cached<::li::detail::khash(#name)>())
-
-// returns dll base address or an infinite loop or crashes if it does not exist
-#define LI_MODULE(name) ::li::detail::module_handle<::li::detail::khash(name)>()
-
-// returns dll base address or nullptr if it does not exist
-#define LI_MODULE_SAFE(name) ::li::detail::module_handle_safe<::li::detail::khash(name)>()
-
+// NOTE only std::forward is used from this header.
+// If there is a need to eliminate this dependency the function itself is very small.
+#include <utility>
 #include <cstddef>
 #include <intrin.h>
 
@@ -96,7 +41,7 @@
 #define LAZY_IMPORTER_FORCEINLINE inline
 #endif
 #else
-#define LAZY_IMPORTER_INLINE inline
+#define LAZY_IMPORTER_FORCEINLINE inline
 #endif
 
 #ifdef LAZY_IMPORTER_CASE_INSENSITIVE
@@ -160,21 +105,6 @@ namespace li { namespace detail {
                 return reinterpret_cast<const LDR_DATA_TABLE_ENTRY_T*>(
                     InLoadOrderLinks.Flink);
             }
-        };
-
-        struct NT_TIB {
-            void*   ExceptionList;
-            void*   StackBase;
-            void*   StackLimit;
-            void*   SubSystemTib;
-            void*   FiberData;
-            void*   ArbitraryUserPointer;
-            NT_TIB* Self;
-        };
-
-        struct TEB {
-            void*  Reserved1[12];
-            PEB_T* ProcessEnvironmentBlock;
         };
 
         struct IMAGE_DOS_HEADER { // DOS .EXE header
@@ -338,14 +268,13 @@ namespace li { namespace detail {
         for(;;) {
             char c = *str++;
             if(!c)
-                break;
+                return value;
             value = hash_t::single(value, c);
         }
-        return value;
     }
 
-    LAZY_IMPORTER_FORCEINLINE hash_t::value_type
-                              hash(const win::UNICODE_STRING_T& str) noexcept
+    LAZY_IMPORTER_FORCEINLINE hash_t::value_type hash(
+        const win::UNICODE_STRING_T& str) noexcept
     {
         auto       first = str.Buffer;
         const auto last  = first + (str.Length / sizeof(wchar_t));
@@ -356,8 +285,8 @@ namespace li { namespace detail {
         return value;
     }
 
-    LAZY_IMPORTER_FORCEINLINE pair<hash_t::value_type, hash_t::value_type>
-                              hash_forwarded(const char* str) noexcept
+    LAZY_IMPORTER_FORCEINLINE pair<hash_t::value_type, hash_t::value_type> hash_forwarded(
+        const char* str) noexcept
     {
         pair<hash_t::value_type, hash_t::value_type> module_and_function{
             hash_t::offset, hash_t::offset
@@ -379,15 +308,11 @@ namespace li { namespace detail {
     LAZY_IMPORTER_FORCEINLINE const win::PEB_T* peb() noexcept
     {
 #if defined(_WIN64)
-        return reinterpret_cast<const win::TEB*>(
-                   __readgsqword(offsetof(win::NT_TIB, Self)))
-            ->ProcessEnvironmentBlock;
+        return reinterpret_cast<const win::PEB_T*>(__readgsqword(0x60));
 #elif defined(_WIN32)
-        return reinterpret_cast<const win::TEB*>(
-                   __readfsdword(offsetof(win::NT_TIB, Self)))
-            ->ProcessEnvironmentBlock;
+        return reinterpret_cast<const win::PEB_T*>(__readfsdword(0x30));
 #else
-#error unsupported platform. Open an issues and I might add something for you.
+#error Unsupported platform. Open an issue and I'll probably add support.
 #endif
     }
 
@@ -396,15 +321,15 @@ namespace li { namespace detail {
         return reinterpret_cast<const win::PEB_LDR_DATA_T*>(peb()->Ldr);
     }
 
-    LAZY_IMPORTER_FORCEINLINE const win::IMAGE_NT_HEADERS*
-                                    nt_headers(const char* base) noexcept
+    LAZY_IMPORTER_FORCEINLINE const win::IMAGE_NT_HEADERS* nt_headers(
+        const char* base) noexcept
     {
         return reinterpret_cast<const win::IMAGE_NT_HEADERS*>(
             base + reinterpret_cast<const win::IMAGE_DOS_HEADER*>(base)->e_lfanew);
     }
 
-    LAZY_IMPORTER_FORCEINLINE const win::IMAGE_EXPORT_DIRECTORY*
-                                    image_export_dir(const char* base) noexcept
+    LAZY_IMPORTER_FORCEINLINE const win::IMAGE_EXPORT_DIRECTORY* image_export_dir(
+        const char* base) noexcept
     {
         return reinterpret_cast<const win::IMAGE_EXPORT_DIRECTORY*>(
             base + nt_headers(base)->OptionalHeader.DataDirectory->VirtualAddress);
@@ -419,9 +344,7 @@ namespace li { namespace detail {
     struct exports_directory {
         const char*                        _base;
         const win::IMAGE_EXPORT_DIRECTORY* _ied;
-#ifdef LAZY_IMPORTER_RESOLVE_FORWARDED_EXPORTS
-        unsigned long _ied_size;
-#endif
+        unsigned long                      _ied_size;
 
     public:
         using size_type = unsigned long;
@@ -429,14 +352,10 @@ namespace li { namespace detail {
         LAZY_IMPORTER_FORCEINLINE
         exports_directory(const char* base) noexcept : _base(base)
         {
-#ifdef LAZY_IMPORTER_RESOLVE_FORWARDED_EXPORTS
             const auto ied_data_dir = nt_headers(base)->OptionalHeader.DataDirectory[0];
             _ied = reinterpret_cast<const win::IMAGE_EXPORT_DIRECTORY*>(
                 base + ied_data_dir.VirtualAddress);
             _ied_size = ied_data_dir.Size;
-#else
-            _ied = image_export_dir(base);
-#endif
         }
 
         LAZY_IMPORTER_FORCEINLINE explicit operator bool() const noexcept
@@ -473,138 +392,261 @@ namespace li { namespace detail {
             return _base + rva_table[ord_table[index]];
         }
 
-#ifdef LAZY_IMPORTER_RESOLVE_FORWARDED_EXPORTS
         LAZY_IMPORTER_FORCEINLINE bool is_forwarded(const char* export_address) const
             noexcept
         {
             const auto ui_ied = reinterpret_cast<const char*>(_ied);
             return (export_address > ui_ied && export_address < ui_ied + _ied_size);
         }
-#endif
     };
 
-    template<hash_t::value_type Hash>
-    LAZY_IMPORTER_FORCEINLINE const char* module_handle()
-    {
-        auto head = ldr_data_entry();
-        while(true) {
-            if(hash(head->BaseDllName) == Hash)
-                return head->DllBase;
-            head = head->load_order_next();
-        }
-    }
+    struct safe_module_enumerator {
+        using value_type = const detail::win::LDR_DATA_TABLE_ENTRY_T;
+        value_type*       value;
+        value_type* const head;
 
-    template<hash_t::value_type Hash>
-    LAZY_IMPORTER_FORCEINLINE const char* module_handle_safe()
-    {
-        const auto head = ldr_data_entry();
-        auto       it   = head;
-        while(true) {
-            if(hash(it->BaseDllName) == Hash)
-                return it->DllBase;
+        LAZY_IMPORTER_FORCEINLINE safe_module_enumerator() noexcept
+            : value(ldr_data_entry()), head(value)
+        {}
 
-            if(it->InLoadOrderLinks.Flink == reinterpret_cast<const char*>(head))
-                return 0;
+        LAZY_IMPORTER_FORCEINLINE void reset() noexcept { value = head; }
 
-            it = it->load_order_next();
-        }
-    }
-
-    template<hash_t::value_type Hash>
-    LAZY_IMPORTER_FORCEINLINE const char* find_in_module(const char* module_base) noexcept
-    {
-        const exports_directory exports(module_base);
-
-        // we will trust the user with the fact that he provides valid module
-        // which has the export
-        for(unsigned long i = 0u;; ++i)
-            if(hash(exports.name(i)) == Hash)
-                return exports.address(i);
-    }
-
-    template<hash_t::value_type Hash>
-    LAZY_IMPORTER_FORCEINLINE const char* find_nt() noexcept
-    {
-        // load the next entry which will be ntdll
-        const auto* const head = ldr_data_entry()->load_order_next();
-        return find_in_module<Hash>(head->DllBase);
-    }
-
-    struct allow_all_modules {
-        LAZY_IMPORTER_FORCEINLINE constexpr bool
-        operator()(const win::LDR_DATA_TABLE_ENTRY_T*) const noexcept
+        LAZY_IMPORTER_FORCEINLINE bool next() noexcept
         {
+            value = value->load_order_next();
+            return value != head;
+        }
+    };
+
+    struct unsafe_module_enumerator {
+        using value_type = const detail::win::LDR_DATA_TABLE_ENTRY_T*;
+        value_type value;
+
+        LAZY_IMPORTER_FORCEINLINE unsafe_module_enumerator() noexcept
+            : value(ldr_data_entry())
+        {}
+
+        LAZY_IMPORTER_FORCEINLINE void reset() noexcept { value = ldr_data_entry(); }
+
+        LAZY_IMPORTER_FORCEINLINE bool next() noexcept
+        {
+            value = value->load_order_next();
             return true;
         }
     };
 
-    struct modules_by_hash {
-        hash_t::value_type _hash;
-
-        LAZY_IMPORTER_FORCEINLINE bool
-        operator()(const win::LDR_DATA_TABLE_ENTRY_T* module) const noexcept
+    // provides the cached functions which use Derive classes methods
+    template<class Derived, class DefaultType = void*>
+    class lazy_base {
+    protected:
+        // This function is needed because every templated function
+        // with different args has its own static buffer
+        LAZY_IMPORTER_FORCEINLINE static void*& _cache() noexcept
         {
-            auto name = module->BaseDllName;
-            name.Length -= 8; // .dll
-            return hash(name) == _hash;
+            static void* value = nullptr;
+            return value;
+        }
+
+    public:
+        template<class T = DefaultType>
+        LAZY_IMPORTER_FORCEINLINE static T safe() noexcept
+        {
+            return Derived::get<T, safe_module_enumerator>();
+        }
+
+        template<class T = DefaultType, class Enum = unsafe_module_enumerator>
+        LAZY_IMPORTER_FORCEINLINE static T cached() noexcept
+        {
+            auto& cached = _cache();
+            if(!cached)
+                cached = Derived::get<void*, Enum>();
+
+            return (T)(cached);
+        }
+
+        template<class T = DefaultType>
+        LAZY_IMPORTER_FORCEINLINE static T safe_cached() noexcept
+        {
+            return cached<T, safe_module_enumerator>();
         }
     };
 
     template<hash_t::value_type Hash>
-    LAZY_IMPORTER_FORCEINLINE const char* find_nocache() noexcept
-    {
-        return find_nocache(Hash, allow_all_modules{});
-    }
-
-    template<class ModuleFilter = allow_all_modules>
-    LAZY_IMPORTER_FORCEINLINE const char*
-    find_nocache(hash_t::value_type function_hash, ModuleFilter module_filter) noexcept
-    {
-        const auto* head = ldr_data_entry();
-
-        while(true) {
-            if(module_filter(head)) {
-                const exports_directory exports(head->DllBase);
-
-                if(exports)
-                    for(auto i = 0u; i < exports.size(); ++i)
-                        if(hash(exports.name(i)) == function_hash) {
-                            const auto addr = exports.address(i);
-
-#ifdef LAZY_IMPORTER_RESOLVE_FORWARDED_EXPORTS
-                            if(exports.is_forwarded(addr)) {
-                                auto hashes =
-                                    hash_forwarded(reinterpret_cast<const char*>(addr));
-                                return find_nocache(hashes.second,
-                                                    modules_by_hash{ hashes.first });
-                            }
-#endif
-                            return addr;
-                        }
-            }
-
-            head = head->load_order_next();
+    struct lazy_module : lazy_base<lazy_module<Hash>> {
+        template<class T = void*, class Enum = unsafe_module_enumerator>
+        LAZY_IMPORTER_FORCEINLINE static T get() noexcept
+        {
+            Enum e;
+            do {
+                if(hash(e.value->BaseDllName) == Hash)
+                    return (T)(e.value->DllBase);
+            } while(e.next());
+            return {};
         }
-    }
+    };
 
-    template<hash_t::value_type Hash>
-    LAZY_IMPORTER_FORCEINLINE const char* find_cached() noexcept
-    {
-        // don't replace this with "address = find_nocache<Hash>();"
-        static const char* address = 0;
-        if(!address)
-            address = find_nocache<Hash>();
-        return address;
-    }
+    template<hash_t::value_type Hash, class T>
+    struct lazy_function : lazy_base<lazy_function<Hash, T>, T> {
+        template<class... Args>
+        LAZY_IMPORTER_FORCEINLINE decltype(auto) operator()(Args&&... args) const
+        {
+#ifndef LAZY_IMPORTER_CACHE_OPERATOR_PARENS
+            return get()(std::forward<Args>(args)...);
+#else
+            return cached()(std::forward<Args>(args)...);
+#endif
+        }
 
-    template<hash_t::value_type Hash>
-    LAZY_IMPORTER_FORCEINLINE const char* find_nt_cached() noexcept
-    {
-        static const char* address = 0;
-        if(!address)
-            address = find_nt<Hash>();
-        return address;
-    }
+        template<class F = T, class Enum = unsafe_module_enumerator>
+        LAZY_IMPORTER_FORCEINLINE static F get() noexcept
+        {
+            // for backwards compatability.
+            // Before 2.0 it was only possible to resolve forwarded exports when
+            // this macro was enabled
+#ifdef LAZY_IMPORTER_RESOLVE_FORWARDED_EXPORTS
+            return forwarded<F, Enum>();
+#else
+            Enum e;
+            do {
+                const exports_directory exports(e.value->DllBase);
+
+                if(exports) {
+                    auto export_index = exports.size();
+                    while(export_index--)
+                        if(hash(exports.name(export_index)) == Hash)
+                            return (F)(exports.address(export_index));
+                }
+            } while(e.next());
+            return {};
+#endif
+        }
+
+        template<class F = T, class Enum = unsafe_module_enumerator>
+        LAZY_IMPORTER_FORCEINLINE static F forwarded() noexcept
+        {
+            detail::win::UNICODE_STRING_T name;
+            hash_t::value_type            module_hash   = 0;
+            auto                          function_hash = Hash;
+
+            Enum e;
+            do {
+                name = e.value->BaseDllName;
+                name.Length -= 8; // get rid of .dll extension
+
+                if(!module_hash || hash(name) == module_hash) {
+                    const exports_directory exports(e.value->DllBase);
+
+                    if(exports) {
+                        auto export_index = exports.size();
+                        while(export_index--)
+                            if(hash(exports.name(i)) == function_hash) {
+                                const auto addr = exports.address(i);
+
+                                if(exports.is_forwarded(addr)) {
+                                    auto hashes = hash_forwarded(
+                                        reinterpret_cast<const char*>(addr));
+
+                                    function_hash = hashes.second;
+                                    module_hash   = hashes.first;
+
+                                    e.reset();
+                                    break;
+                                }
+                                return (F)(addr);
+                            }
+                    }
+                }
+            } while(e.next());
+            return {};
+        }
+
+        template<class F = T>
+        LAZY_IMPORTER_FORCEINLINE static F forwarded_safe() noexcept
+        {
+            return forwarded<F, safe_module_enumerator>();
+        }
+
+        template<class F = T, class Enum = unsafe_module_enumerator>
+        LAZY_IMPORTER_FORCEINLINE static F forwarded_cached() noexcept
+        {
+            auto& value = _cache();
+            if(!value)
+                value = forwarded<void*, Enum>();
+            return (F)(value);
+        }
+
+        template<class F = T>
+        LAZY_IMPORTER_FORCEINLINE static F forwarded_safe_cached() noexcept
+        {
+            return forwarded_cached<F, safe_module_enumerator>();
+        }
+
+        template<class F = T, bool IsSafe = false, class Module>
+        LAZY_IMPORTER_FORCEINLINE static F in(Module m) noexcept
+        {
+            if(IsSafe && !m)
+                return {};
+
+            const exports_directory exports((const char*)(m));
+            if(IsSafe && !exports)
+                return {};
+
+            for(unsigned long i{};; ++i) {
+                if(IsSafe && i == exports.size())
+                    break;
+
+                if(hash(exports.name(i)) == Hash)
+                    return (F)(exports.address(i));
+            }
+            return {};
+        }
+
+        template<class F = T, class Module>
+        LAZY_IMPORTER_FORCEINLINE static F in_safe(Module m) noexcept
+        {
+            return in<F, true>(m);
+        }
+
+        template<class F = T, bool IsSafe = false, class Module>
+        LAZY_IMPORTER_FORCEINLINE static F in_cached(Module m) noexcept
+        {
+            auto& value = _cache();
+            if(!value)
+                value = in<void*, IsSafe>(m);
+            return (F)(value);
+        }
+
+        template<class F = T, class Module>
+        LAZY_IMPORTER_FORCEINLINE static F in_safe_cached(Module m) noexcept
+        {
+            return in_cached<F, true>(m);
+        }
+
+        template<class F = T>
+        LAZY_IMPORTER_FORCEINLINE static F nt() noexcept
+        {
+            return in<F>(ldr_data_entry()->load_order_next()->DllBase);
+        }
+
+        template<class F = T>
+        LAZY_IMPORTER_FORCEINLINE static F nt_safe() noexcept
+        {
+            return in_safe<F>(ldr_data_entry()->load_order_next()->DllBase);
+        }
+
+        template<class F = T>
+        LAZY_IMPORTER_FORCEINLINE static F nt_cached() noexcept
+        {
+            return in_cached<F>(ldr_data_entry()->load_order_next()->DllBase);
+        }
+
+        template<class F = T>
+        LAZY_IMPORTER_FORCEINLINE static F nt_safe_cached() noexcept
+        {
+            return in_safe_cached<F>(ldr_data_entry()->load_order_next()->DllBase);
+        }
+    };
+
 }} // namespace li::detail
 
 #endif // include guard
